@@ -1,70 +1,63 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-from sklearn.model_selection import train_test_split
+import plotly.express as px
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, confusion_matrix
+from sklearn.model_selection import train_test_split
 
-# --- BƯỚC 1: TIÊU ĐỀ ---
-st.title("🌲 Ứng Dụng Học Máy Random Forest Kiểm Toán")
-st.markdown("---")
+# 1. CẤU HÌNH GIAO DIỆN
+st.set_page_config(page_title="Kiểm Toán AI Cao Cấp", layout="wide")
+st.title("🛡️ HỆ THỐNG KIỂM TOÁN AI (KIỂM TRA SỐ DƯ & GIAO DỊCH BAN ĐÊM)")
 
-# --- BƯỚC 2: ĐỌC FILE DỮ LIỆU VÀ TỰ ĐỘNG SỬA LỖI THIẾU CỘT ---
-try:
-    df = pd.read_csv("financial_anomaly_data.csv")
+# 2. TẢI FILE
+uploaded_file = st.file_uploader("Kéo thả file Excel dữ liệu kiểm toán vào đây:", type=["xlsx", "csv"])
+
+if uploaded_file is not None:
+    df = pd.read_excel(uploaded_file) if uploaded_file.name.endswith('.xlsx') else pd.read_csv(uploaded_file)
     
-    # 🎯 SỬA LỖI KEYERROR: Nếu trong file của bạn CHƯA CÓ cột 'Label', AI sẽ tự tạo ra quy luật:
-    # Nếu số tiền (Amount) lớn hơn 80,000 thì gắn nhãn rủi ro = 1, ngược lại = 0
-    if 'Label' not in df.columns:
-        df['Label'] = np.where(df['Amount'] > 80000, 1, 0)
+    # --- PHẦN TÍNH TOÁN LOGIC KIỂM TOÁN ---
+    # 1. Kiểm tra sai lệch số dư
+    if all(col in df.columns for col in ['Balance_Before', 'Amount', 'Balance_After']):
+        df['Discrepancy'] = (df['Balance_Before'] - df['Amount']) - df['Balance_After']
+    else:
+        df['Discrepancy'] = 0
 
-except FileNotFoundError:
-    # Nếu hoàn toàn không tìm thấy file CSV đâu, hệ thống tự tạo dữ liệu mẫu để chạy thử
-    np.random.seed(42)
-    df = pd.DataFrame({'Amount': np.random.randint(10000, 100000, size=150)})
-    df['Label'] = np.where(df['Amount'] > 80000, 1, 0)
-
-# Hiển thị bảng dữ liệu lên trang web để kiểm toán viên theo dõi
-st.subheader("📋 1. Dữ Liệu Chứng Từ Hiện Có")
-st.dataframe(df.head(10))
-
-# --- BƯỚC 3: CHIA DỮ LIỆU THEO TỶ LỆ CHUẨN 80/20 ---
-X = df[['Amount']] # Lấy cột Amount làm đầu vào dự đoán
-y = df['Label']    # Lấy cột Label làm mục tiêu đánh giá
-
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-st.write(f"📊 Tập học (Train): {len(X_train)} dòng | Tập thi (Test): {len(X_test)} dòng")
-st.markdown("---")
-
-# --- BƯỚC 4: HUẤN LUYỆN VÀ VẼ BIỂU ĐỒ TRỰC QUAN ---
-st.subheader("⚙️ 2. Kết Quả Huấn Luyện AI")
-
-if st.button("🚀 Kích hoạt mô hình Rừng Ngẫu Nhiên"):
-    # 1. Cho mô hình Random Forest học dữ liệu tập Train (80%)
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
-    model.fit(X_train, y_train)
+    # 2. Tạo cột Giao dịch ban đêm (Giả định cột 'Timestamp' có dạng giờ)
+    # Nếu dữ liệu có giờ, AI sẽ tự phân loại: 23h - 4h là ban đêm (1)
+    if 'Timestamp' in df.columns:
+        df['Timestamp'] = pd.to_datetime(df['Timestamp'])
+        df['Hour'] = df['Timestamp'].dt.hour
+        df['Is_Night_Transaction'] = np.where((df['Hour'] >= 23) | (df['Hour'] <= 4), 1, 0)
     
-    # 2. Bắt AI dự đoán thử trên tập Test (20%)
-    y_pred = model.predict(X_test)
-    accuracy = accuracy_score(y_test, y_pred)
+    # 3. GÁN NHÃN GIAN LẬN (Để AI học)
+    # Lỗi nếu: Sai số dư HOẶC Giao dịch đêm + Số tiền quá lớn
+    df['Is_Anomaly'] = np.where((df['Discrepancy'].abs() > 0.01) | 
+                                ((df['Is_Night_Transaction'] == 1) & (df['Amount'] > df['Amount'].quantile(0.95))), 1, 0)
+
+    # --- PHẦN AI HỌC MÔ HÌNH ---
+    features = ['Amount', 'Balance_Before', 'Balance_After', 'Is_Night_Transaction']
+    X = df[features].fillna(0)
+    y = df['Is_Anomaly']
     
-    # 3. In điểm số chính xác lên màn hình chính
-    st.success(f"🎯 Mô hình đạt độ chính xác: {accuracy * 100:.2f}%")
+    rf = RandomForestClassifier(n_estimators=100)
+    rf.fit(X, y)
     
-    # 4. Vẽ biểu đồ Ma trận nhầm lẫn (Confusion Matrix) để báo cáo
-    st.markdown("---")
-    st.subheader("📊 3. Biểu Đồ Đánh Giá Sai Sót (Confusion Matrix)")
-    st.write("Biểu đồ này minh họa khả năng phân loại đúng/sai của mô hình học máy khi phát hiện rủi ro.")
-    
-    cm = confusion_matrix(y_test, y_pred)
-    fig, ax = plt.subplots(figsize=(4, 3))
-    
-    # Sử dụng thư viện seaborn vẽ bảng ma trận màu xanh bắt mắt
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                xticklabels=['Đoán An toàn', 'Đoán Rủi ro'],
-                yticklabels=['Thực tế An toàn', 'Thực tế Rủi ro'], ax=ax)
-    
-    st.pyplot(fig) # Lệnh hiển thị biểu đồ lên giao diện trang web
+    # 4. HIỂN THỊ KẾT QUẢ
+    st.subheader("📊 Báo cáo phân tích AI")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Tổng giao dịch bị AI gắn cờ đỏ", f"{df['Is_Anomaly'].sum()} ca")
+    with col2:
+        st.metric("Giao dịch ban đêm nghi vấn", f"{df['Is_Night_Transaction'].sum()} ca")
+
+    # 5. BIỂU ĐỒ TRỰC QUAN
+    fig = px.scatter(
+        df, x="Is_Night_Transaction", y="Amount", color=df['Is_Anomaly'].astype(str),
+        title="AI phân loại: Giao dịch ban đêm (1) vs Ban ngày (0) - Chấm ĐỎ là nghi vấn",
+        color_discrete_map={"0": "green", "1": "red"}
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # 6. BẢNG CHI TIẾT
+    st.subheader("📋 Danh sách giao dịch AI cảnh báo")
+    st.dataframe(df[df['Is_Anomaly'] == 1])
