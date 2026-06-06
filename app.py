@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 from sklearn.ensemble import RandomForestClassifier
-# ĐÂY NÈ LINH ƠI, TỚ ĐÃ BỔ SUNG HÀM CHIA DỮ LIỆU Ở ĐÂY RỒI NHÉ:
+
 from sklearn.model_selection import train_test_split
 
 st.set_page_config(page_title="Kiểm Toán AI Cao Cấp", layout="wide")
